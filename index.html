@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#1b1d22">
+<title>Yaesu CAT + 瀑布</title>
+<style>
+  :root{
+    --bg:#eef1f7; --card:#ffffff; --fg:#1a1a1a; --sub:#5f6470;
+    --accent:#0067c0; --good:#0f7b0f; --warn:#9d5d00; --bad:#c42b1c;
+    --border:#d4dae6; --track:#e6ecf5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#1b1d22; --card:#2b2f37; --fg:#f2f2f2; --sub:#9aa0b0;
+      --accent:#4cc2ff; --good:#6ccb5f; --warn:#d8a657; --bad:#ff99a4;
+      --border:#3a3f49; --track:#23262e;
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:14px}
+  header{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0;font-weight:700}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);display:inline-block}
+  .dot.on{background:var(--good)}
+  .status{color:var(--sub);font-size:13px}.spacer{flex:1}
+  button,select{font:inherit;border:1px solid var(--border);background:var(--card);color:var(--fg);
+    padding:9px 13px;border-radius:10px;cursor:pointer}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  @media (prefers-color-scheme: dark){button.primary{color:#10223f}}
+  button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+  @media (prefers-color-scheme: dark){button.sel{color:#10223f}}
+  button.danger{border-color:var(--bad);color:var(--bad)}
+  button:disabled{opacity:.45}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:14px;margin:0 0 10px;font-weight:600}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .freq{font-variant-numeric:tabular-nums;font-weight:700;font-size:40px;letter-spacing:1px;
+    font-family:ui-monospace,Consolas,monospace}
+  .freq small{font-size:18px;color:var(--sub);font-weight:600}
+  .mode{font-size:15px;color:var(--accent);font-weight:700;margin-left:8px}
+  .grid{display:flex;gap:6px;flex-wrap:wrap}
+  .grid button{padding:8px 11px;font-size:14px}
+  input[type=text],input[type=number]{font:inherit;background:var(--card);color:var(--fg);
+    border:1px solid var(--border);border-radius:10px;padding:9px 12px;width:140px}
+  .smeter{height:22px;background:var(--track);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .smeter>div{height:100%;width:0;background:var(--good);transition:width .1s linear}
+  label.lbl{color:var(--sub);font-size:13px}
+  canvas{width:100%;display:block;border-radius:10px;background:#000}
+  #wf{height:240px} #spec{height:90px;margin-bottom:4px}
+  .axis{display:flex;justify-content:space-between;color:var(--sub);font-size:11px;margin-top:3px}
+  .hint{color:var(--sub);font-size:12px;line-height:1.5}
+  input[type=range]{flex:1;min-width:120px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Yaesu <span style="color:var(--sub);font-weight:500">CAT</span></h1>
+    <span class="status" id="status">未连接 Offline</span>
+    <span class="spacer"></span>
+    <select id="transport" title="传输方式">
+      <option value="serial">USB 串口 (桌面)</option>
+      <option value="ble">蓝牙 BLE (CAT 桥)</option>
+    </select>
+    <select id="baud" title="波特率">
+      <option>4800</option><option>9600</option><option>19200</option>
+      <option selected>38400</option><option>57600</option><option>115200</option>
+    </select>
+    <button class="primary" id="btnConn">连接 Connect</button>
+  </header>
+
+  <div class="card">
+    <div class="row">
+      <div class="freq"><span id="freq">—</span> <small>MHz</small></div>
+      <span class="mode" id="modeTxt"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="freqIn" placeholder="频率 MHz, 如 14.250">
+      <button id="btnSetF">设频率 Set</button>
+      <span class="lbl" id="txTag" style="margin-left:auto"></span>
+    </div>
+    <h2 style="margin-top:14px">波段 Band</h2>
+    <div class="grid" id="bands"></div>
+    <h2 style="margin-top:12px">模式 Mode</h2>
+    <div class="grid" id="modes"></div>
+    <h2 style="margin-top:12px">S 表 / 发射 PTT</h2>
+    <div class="smeter"><div id="sbar"></div></div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnPTT" class="danger">按住发射 PTT (hold)</button>
+      <button id="btnTune" class="danger">TUNE 5s</button>
+      <span class="lbl">发射前务必确认天线/假负载已接好。</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">音频瀑布 Audio Waterfall</h2>
+      <button id="btnAudio">启用音频 Enable</button>
+    </div>
+    <div class="row" style="margin:8px 0">
+      <label class="lbl">输入</label>
+      <select id="audioDev" style="flex:1;min-width:140px"><option>（点"启用音频"后选择）</option></select>
+    </div>
+    <div class="row" style="margin-bottom:6px">
+      <label class="lbl">跨度</label>
+      <select id="span"><option value="3500">0–3.5 kHz (SSB)</option>
+        <option value="6000">0–6 kHz</option><option value="12000">0–12 kHz</option>
+        <option value="0">全 Full</option></select>
+      <label class="lbl">增益</label>
+      <input type="range" id="gain" min="0" max="100" value="55">
+    </div>
+    <canvas id="spec"></canvas>
+    <canvas id="wf"></canvas>
+    <div class="axis" id="axis"><span>0</span><span></span><span></span></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">日志 Log</h2>
+      <button id="btnClear" style="padding:6px 10px;font-size:13px">清空 Clear</button>
+    </div>
+    <div id="log" style="height:120px;overflow:auto;background:var(--track);border:1px solid var(--border);
+      border-radius:10px;padding:8px;font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:pre-wrap;color:var(--sub)"></div>
+    <p class="hint" id="hint"></p>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ===== Yaesu CAT(FT-710 等现代八重洲) + 音频瀑布 =====
+   传输：Web Serial(桌面 USB) 或 Web Bluetooth(BLE 透传 CAT 桥)。
+   CAT 命令以 ';' 结尾；音频用 getUserMedia + Web Audio 做 AF 瀑布。 */
+
+const $=id=>document.getElementById(id);
+function log(m,c){const el=$("log");const at=el.scrollTop+el.clientHeight>=el.scrollHeight-4;
+  const d=document.createElement("div");d.textContent="[" + new Date().toTimeString().slice(0,8)+"] "+m;
+  if(c==="err")d.style.color="var(--bad)"; if(c==="tx")d.style.color="var(--accent)";
+  el.appendChild(d); while(el.childNodes.length>400)el.removeChild(el.firstChild); if(at)el.scrollTop=el.scrollHeight;}
+
+/* ---------------- 传输层（统一 send / onChunk） ---------------- */
+let link=null, pollTimer=null;
+function setStatus(t,on){$("status").textContent=t;$("dot").classList.toggle("on",!!on);}
+
+class SerialLink{
+  async connect(baud){
+    if(!("serial" in navigator)) throw new Error("此浏览器不支持 Web Serial（桌面 Chrome/Edge，HTTPS）。安卓请改用蓝牙。");
+    this.port=await navigator.serial.requestPort();
+    await this.port.open({baudRate:baud});
+    this.enc=new TextEncoder(); this.dec=new TextDecoder();
+    this.writer=this.port.writable.getWriter();
+    this._read();
+  }
+  async _read(){
+    this.reader=this.port.readable.getReader();
+    try{ for(;;){ const {value,done}=await this.reader.read(); if(done)break;
+      if(value) onChunk(this.dec.decode(value)); } }
+    catch(e){ log("串口读取结束: "+e.message,"err"); }
+  }
+  async send(s){ await this.writer.write(this.enc.encode(s)); }
+  async close(){ try{await this.reader.cancel();}catch(_){} try{this.writer.releaseLock();}catch(_){}
+    try{await this.port.close();}catch(_){} }
+}
+
+const BLE_OPT=['6e400001-b5a3-f393-e0a9-e50e24dcca9e',0xffe0,0xfff0,0xffe5,0xff00,0xfee0];
+class BleLink{
+  async connect(){
+    if(!navigator.bluetooth) throw new Error("此浏览器不支持 Web Bluetooth（安卓 Chrome，HTTPS）。");
+    this.dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:BLE_OPT});
+    this.dev.addEventListener("gattserverdisconnected",onDisconnect);
+    this.srv=await this.dev.gatt.connect();
+    let nC=null,wC=null,services=[]; try{services=await this.srv.getPrimaryServices();}catch(_){}
+    for(const s of services){let cs=[];try{cs=await s.getCharacteristics();}catch(_){continue;}
+      const n=cs.find(c=>c.properties.notify||c.properties.indicate);
+      const w=cs.find(c=>c.properties.write||c.properties.writeWithoutResponse);
+      if(n){nC=n;wC=w||wC;break;} if(w&&!wC)wC=w;}
+    if(!nC) throw new Error("未找到可通知特征。");
+    this.wC=wC; this.enc=new TextEncoder();
+    await nC.startNotifications();
+    nC.addEventListener("characteristicvaluechanged",e=>{
+      const v=e.target.value;let s="";for(let i=0;i<v.byteLength;i++)s+=String.fromCharCode(v.getUint8(i));onChunk(s);});
+  }
+  async send(s){ if(!this.wC)return; const d=this.enc.encode(s);
+    for(let i=0;i<d.length;i+=20){const c=d.slice(i,i+20);
+      if(this.wC.properties.writeWithoutResponse)await this.wC.writeValueWithoutResponse(c);else await this.wC.writeValue(c);} }
+  async close(){ try{if(this.dev&&this.dev.gatt.connected)this.dev.gatt.disconnect();}catch(_){} }
+}
+
+/* ---------------- CAT 收发 / 解析 ---------------- */
+let rxbuf="";
+function onChunk(s){ rxbuf+=s; let i;
+  while((i=rxbuf.indexOf(";"))>=0){ const f=rxbuf.slice(0,i).trim(); rxbuf=rxbuf.slice(i+1); if(f)handleCAT(f+";"); } }
+
+const MODE_NAME={1:"LSB",2:"USB",3:"CW",4:"FM",5:"AM",6:"RTTY-L",7:"CW-L",8:"DATA-L",9:"RTTY-U","A":"DATA-FM","B":"FM-N","C":"DATA-U","D":"AM-N","E":"C4FM"};
+function handleCAT(f){
+  if(f.startsWith("FA")&&f.length>=12){
+    const hz=parseInt(f.slice(2,11),10);
+    if(!isNaN(hz)) $("freq").textContent=(hz/1e6).toFixed(4);
+  }else if(f.startsWith("MD0")){
+    const code=f.charAt(3); $("modeTxt").textContent=MODE_NAME[code]||("MD"+code);
+  }else if(f.startsWith("SM0")){
+    const v=parseInt(f.slice(3,6),10);
+    if(!isNaN(v)) $("sbar").style.width=Math.min(v/255,1)*100+"%";
+  }else if(f.startsWith("IF")){
+    /* IF; 信息帧：含频率与发射状态，可扩展解析 */
+  }
+  log("← "+f,"rx");
+}
+
+async function cat(cmd){ if(!link)return; try{ await link.send(cmd); log("→ "+cmd,"tx"); }
+  catch(e){ log("发送失败: "+e.message,"err"); } }
+
+/* ---------------- 连接 ---------------- */
+async function connect(){
+  const t=$("transport").value;
+  try{
+    setStatus("连接中… Connecting",false);
+    link = t==="serial" ? new SerialLink() : new BleLink();
+    await (t==="serial" ? link.connect(parseInt($("baud").value,10)) : link.connect());
+    setStatus("已连接 Connected", true); uiConn(true);
+    await cat("AI0;");                 // 关闭自动播报，改主动轮询
+    await cat("FA;"); await cat("MD0;");
+    startPoll();
+  }catch(e){ setStatus("未连接 Offline",false);
+    if(e&&e.name==="NotFoundError") log("已取消选择。","tx"); else log("连接失败: "+(e&&e.message||e),"err"); }
+}
+function startPoll(){ stopPoll(); pollTimer=setInterval(async()=>{
+  await cat("FA;"); await cat("MD0;"); await cat("SM0;"); }, 500); }
+function stopPoll(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} }
+async function disconnect(){ stopPoll(); if(link){try{await link.close();}catch(_){}} onDisconnect(); }
+function onDisconnect(){ stopPoll(); link=null; uiConn(false); setStatus("已断开 Disconnected",false);
+  $("freq").textContent="—"; $("modeTxt").textContent=""; $("sbar").style.width="0"; }
+
+function uiConn(yes){
+  $("btnConn").textContent=yes?"断开 Disconnect":"连接 Connect";
+  ["btnSetF","btnPTT","btnTune"].forEach(id=>$(id).disabled=!yes);
+  $("transport").disabled=yes; $("baud").disabled=yes;
+}
+
+/* ---------------- 控件 ---------------- */
+const BANDS=[["160m",1.900],["80m",3.700],["40m",7.100],["30m",10.125],["20m",14.200],
+  ["17m",18.100],["15m",21.250],["12m",24.940],["10m",28.400],["6m",50.150]];
+const MODES=[["LSB",1],["USB",2],["CW",3],["AM",5],["FM",4],["DATA-U","C"]];
+function freqCmd(mhz){ const hz=Math.round(mhz*1e6); return "FA"+String(hz).padStart(9,"0")+";"; }
+
+const bandsEl=$("bands");
+BANDS.forEach(([n,f])=>{const b=document.createElement("button");b.textContent=n;
+  b.onclick=()=>cat(freqCmd(f)); bandsEl.appendChild(b);});
+const modesEl=$("modes");
+MODES.forEach(([n,c])=>{const b=document.createElement("button");b.textContent=n;
+  b.onclick=()=>{cat("MD0"+c+";");} ; modesEl.appendChild(b);});
+
+$("btnConn").onclick=()=>{ link?disconnect():connect(); };
+$("btnSetF").onclick=()=>{ const v=parseFloat($("freqIn").value); if(v>0)cat(freqCmd(v)); };
+$("freqIn").addEventListener("keydown",e=>{if(e.key==="Enter")$("btnSetF").click();});
+// PTT 按住发射
+let pttDown=false;
+function pttStart(){ if(pttDown)return; pttDown=true; cat("TX1;"); $("txTag").textContent="● 发射 TX"; $("txTag").style.color="var(--bad)"; }
+function pttStop(){ if(!pttDown)return; pttDown=false; cat("TX0;"); $("txTag").textContent=""; }
+const ptt=$("btnPTT");
+["mousedown","touchstart"].forEach(ev=>ptt.addEventListener(ev,e=>{e.preventDefault();pttStart();}));
+["mouseup","mouseleave","touchend","touchcancel"].forEach(ev=>ptt.addEventListener(ev,e=>{e.preventDefault();pttStop();}));
+$("btnTune").onclick=()=>{ cat("TX1;"); $("txTag").textContent="● TUNE"; $("txTag").style.color="var(--bad)";
+  setTimeout(()=>{cat("TX0;");$("txTag").textContent="";},5000); };
+$("btnClear").onclick=()=>{ $("log").innerHTML=""; };
+
+/* ---------------- 音频瀑布 ---------------- */
+let audioCtx=null, analyser=null, srcNode=null, stream=null, wfRAF=null;
+const specCv=$("spec"), wfCv=$("wf"); let sctx, wctx;
+function fitCanvas(cv){ const r=cv.getBoundingClientRect(), d=window.devicePixelRatio||1;
+  cv.width=Math.round(r.width*d); cv.height=Math.round(r.height*d); return cv.getContext("2d"); }
+
+async function listAudio(){
+  try{ const ds=await navigator.mediaDevices.enumerateDevices();
+    const sel=$("audioDev"); sel.innerHTML="";
+    ds.filter(d=>d.kind==="audioinput").forEach(d=>{const o=document.createElement("option");
+      o.value=d.deviceId; o.textContent=d.label||("输入 "+sel.length); sel.appendChild(o);});
+    if(!sel.options.length){const o=document.createElement("option");o.textContent="无可用输入";sel.appendChild(o);}
+  }catch(e){ log("枚举音频设备失败: "+e.message,"err"); }
+}
+async function enableAudio(){
+  try{
+    const dev=$("audioDev").value;
+    const constraints={audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}};
+    if(dev) constraints.audio.deviceId={exact:dev};
+    stream=await navigator.mediaDevices.getUserMedia(constraints);
+    await listAudio();                                   // 拿到权限后标签才有名字
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    srcNode=audioCtx.createMediaStreamSource(stream);
+    analyser=audioCtx.createAnalyser(); analyser.fftSize=4096; analyser.smoothingTimeConstant=0.5;
+    srcNode.connect(analyser);
+    sctx=fitCanvas(specCv); wctx=fitCanvas(wfCv);
+    $("btnAudio").textContent="停止 Stop"; $("btnAudio").classList.add("sel");
+    drawAxis(); loopWF();
+    log("音频已启用，采样率 "+audioCtx.sampleRate+" Hz","tx");
+  }catch(e){ log("音频启用失败: "+e.message,"err"); }
+}
+function disableAudio(){
+  if(wfRAF)cancelAnimationFrame(wfRAF), wfRAF=null;
+  if(stream)stream.getTracks().forEach(t=>t.stop()), stream=null;
+  if(audioCtx)audioCtx.close(), audioCtx=null;
+  $("btnAudio").textContent="启用音频 Enable"; $("btnAudio").classList.remove("sel");
+}
+function spanBins(){ // 返回要显示的 bin 数
+  const sr=audioCtx.sampleRate, n=analyser.frequencyBinCount, span=parseInt($("span").value,10);
+  if(!span) return n; return Math.max(8, Math.min(n, Math.round(span/(sr/2)*n)));
+}
+function colorFor(v){ // 0..255 -> 经典瀑布色
+  const t=v/255; let r,g,b;
+  if(t<0.25){r=0;g=0;b=Math.round(80+t*4*175);}
+  else if(t<0.5){r=0;g=Math.round((t-0.25)*4*255);b=255;}
+  else if(t<0.75){r=Math.round((t-0.5)*4*255);g=255;b=Math.round(255-(t-0.5)*4*255);}
+  else{r=255;g=Math.round(255-(t-0.75)*4*255);b=0;}
+  return "rgb("+r+","+g+","+b+")";
+}
+function drawAxis(){
+  const span=parseInt($("span").value,10)||(audioCtx?audioCtx.sampleRate/2:24000);
+  const a=$("axis"); a.children[0].textContent="0";
+  a.children[1].textContent=(span/2/1000).toFixed(1)+" kHz";
+  a.children[2].textContent=(span/1000).toFixed(1)+" kHz";
+}
+$("span").addEventListener("change",()=>{ if(audioCtx)drawAxis(); });
+function loopWF(){
+  const bins=spanBins(), data=new Uint8Array(analyser.frequencyBinCount);
+  const gain=parseInt($("gain").value,10)/50;       // 0..2
+  analyser.getByteFrequencyData(data);
+  const W=wfCv.width, H=wfCv.height;
+  // 瀑布：整体上移 1px，底部画新行
+  const img=wctx.getImageData(0,1,W,H-1); wctx.putImageData(img,0,0);
+  for(let x=0;x<W;x++){ const bi=Math.floor(x/W*bins); let v=Math.min(255,data[bi]*gain);
+    wctx.fillStyle=colorFor(v); wctx.fillRect(x,H-1,1,1); }
+  // 频谱线
+  const SW=specCv.width, SH=specCv.height; sctx.clearRect(0,0,SW,SH);
+  sctx.strokeStyle=getComputedStyle(document.body).getPropertyValue("--accent")||"#4cc2ff";
+  sctx.lineWidth=Math.max(1,(window.devicePixelRatio||1));
+  sctx.beginPath();
+  for(let x=0;x<SW;x++){ const bi=Math.floor(x/SW*bins); const v=Math.min(255,data[bi]*gain);
+    const y=SH-(v/255)*SH; if(x===0)sctx.moveTo(x,y); else sctx.lineTo(x,y); }
+  sctx.stroke();
+  wfRAF=requestAnimationFrame(loopWF);
+}
+$("btnAudio").onclick=()=>{ audioCtx?disableAudio():enableAudio(); };
+window.addEventListener("resize",()=>{ if(audioCtx){sctx=fitCanvas(specCv);wctx=fitCanvas(wfCv);} });
+
+uiConn(false);
+const okSerial=("serial" in navigator), okBle=!!navigator.bluetooth;
+$("hint").textContent =
+  "传输：USB 串口需桌面 Chrome/Edge+HTTPS"+(okSerial?"（本机支持）":"（本机不支持）")+
+  "；蓝牙 BLE 走 CAT 桥，安卓可用"+(okBle?"（本机支持）":"（本机不支持）")+
+  "。音频瀑布是接收音频(AF)频谱，约 0–3.5kHz 看 SSB/CW/数字最清楚；桌面可选电台 USB 声卡作为输入。";
+listAudio();
+</script>
+</body>
+</html>
